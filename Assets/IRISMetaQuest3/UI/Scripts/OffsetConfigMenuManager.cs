@@ -32,10 +32,18 @@ public class OffsetConfigMenuManager : MonoBehaviour
     {
         if (irisOrigin == null)
         {
-            Debug.LogError("[OffsetConfigMenuManager] IrisOrigin reference is missing!");
+            irisOrigin = FindFirstObjectByType<IRISOrigin>();
+        }
+
+        if (irisOrigin == null)
+        {
+            Debug.LogError("[OffsetConfigMenuManager] IrisOrigin could not be found!");
+            enabled = false;
             return;
         }
+
         irisOrigin.OnOffsetApplied += Initialize;
+        Initialize(new SceneOffset());
         AddListeners();
     }
 
@@ -58,12 +66,12 @@ public class OffsetConfigMenuManager : MonoBehaviour
         this.offset = offset;
 
         // Initialize Sliders (Position: Meters -> mm, Rotation: Degrees -> Degrees)
-        offsetX.value = offset.x * 1000f;
-        offsetY.value = offset.y * 1000f;
-        offsetZ.value = offset.z * 1000f;
-        rotX.value = offset.rotX;
-        rotY.value = offset.rotY;
-        rotZ.value = offset.rotZ;
+        offsetX.SetValueWithoutNotify(offset.x * 1000f);
+        offsetY.SetValueWithoutNotify(offset.y * 1000f);
+        offsetZ.SetValueWithoutNotify(offset.z * 1000f);
+        rotX.SetValueWithoutNotify(offset.rotX);
+        rotY.SetValueWithoutNotify(offset.rotY);
+        rotZ.SetValueWithoutNotify(offset.rotZ);
 
         // Initialize Text
         UpdatePositionText(offsetX.value, offsetXText);

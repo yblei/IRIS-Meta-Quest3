@@ -41,6 +41,7 @@ namespace IRIS.MetaQuest3.QRCodeDetection
             => OVRAnchor.TrackerConfiguration.QRCodeTrackingSupported;
 
         private Dictionary<string, MRUKTrackable> _trackedQRCodes = new Dictionary<string, MRUKTrackable>();
+        private readonly List<MRUKTrackable> _mrukTrackables = new List<MRUKTrackable>();
 
 
         [SerializeField]
@@ -81,7 +82,18 @@ namespace IRIS.MetaQuest3.QRCodeDetection
 
 
         void OnDestroy()
-            => s_instance = null;
+        {
+            if (_mrukInstance)
+            {
+                _mrukInstance.SceneSettings.TrackableAdded.RemoveListener(OnTrackableAdded);
+                _mrukInstance.SceneSettings.TrackableRemoved.RemoveListener(OnTrackableRemoved);
+            }
+
+            if (s_instance == this)
+            {
+                s_instance = null;
+            }
+        }
 
         public void OnTrackableAdded(MRUKTrackable trackable)
         {
@@ -93,6 +105,12 @@ namespace IRIS.MetaQuest3.QRCodeDetection
             }
 
             if (trackable.MarkerPayloadString == null)
+            {
+                return;
+            }
+
+            if (_trackedQRCodes.TryGetValue(trackable.MarkerPayloadString, out MRUKTrackable existing) &&
+                existing == trackable)
             {
                 return;
             }
@@ -135,8 +153,29 @@ namespace IRIS.MetaQuest3.QRCodeDetection
             }
         }
 
-        internal Dictionary<string, MRUKTrackable> GetTrackedQRCodes()
+        /// <summary>
+        /// Every QR code currently tracked, keyed by payload string. Consumed
+        /// by the alignment manager, which picks out the markers named in its
+        /// layout and ignores anything else in the room.
+        /// </summary>
+        public Dictionary<string, MRUKTrackable> GetTrackedQRCodes()
         {
+            _trackedQRCodes.Clear();
+            if (!_mrukInstance)
+            {
+                return _trackedQRCodes;
+            }
+
+            _mrukInstance.GetTrackables(_mrukTrackables);
+            foreach (MRUKTrackable trackable in _mrukTrackables)
+            {
+                if (trackable && trackable.TrackableType == OVRAnchor.TrackableType.QRCode &&
+                    !string.IsNullOrEmpty(trackable.MarkerPayloadString))
+                {
+                    _trackedQRCodes[trackable.MarkerPayloadString] = trackable;
+                }
+            }
+
             return _trackedQRCodes;
         }
 

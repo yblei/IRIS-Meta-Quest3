@@ -3,6 +3,7 @@ using System;
 using TMPro;
 using UnityEngine.Events;
 using IRIS.Node;
+using IRIS.MetaQuest3.Alignment;
 using NUnit.Framework.Internal;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
@@ -43,10 +44,16 @@ public class MQ3MenuManager : Singleton<MQ3MenuManager>
         {
             Debug.LogError("Scene Grabbable is not assigned in the inspector.");
         }
-        onQRTrackingStarted.AddListener(() => debugText.text = "QR Tracking Started");
         onQRTrackingStarted.AddListener(() => qrAlignmentManager.StartQRAlignment());
-        onQRTrackingStopped.AddListener(() => debugText.text = "QR Tracking Stopped");
         onQRTrackingStopped.AddListener(() => qrAlignmentManager.StopQRAlignment());
+
+        // The alignment manager reports progress, rejections and the quality
+        // numbers itself, so let it drive the panel rather than overwriting it
+        // with a fixed "QR Tracking Started".
+        if (qrAlignmentManager != null)
+        {
+            qrAlignmentManager.onStatusChanged.AddListener(ShowAlignmentStatus);
+        }
         onAlignmentStarted.AddListener(() => debugText.text = "Alignment Started");
         onAlignmentStarted.AddListener(() => sceneGrabbable.EnableGrab());
         onAlignmentStopped.AddListener(() => debugText.text = "Alignment Stopped");
@@ -75,6 +82,37 @@ public class MQ3MenuManager : Singleton<MQ3MenuManager>
         else
         {
             onAlignmentStopped?.Invoke();
+        }
+    }
+
+    /// <summary>Hook for a Recalibrate button: discards the lock and solves again.</summary>
+    public void RecalibrateAlignment()
+    {
+        if (qrAlignmentManager == null)
+        {
+            return;
+        }
+
+        qrAlignmentManager.Recalibrate();
+    }
+
+    /// <summary>Hook for a Details button: full quality readout for the last solve.</summary>
+    public void ShowAlignmentDetail()
+    {
+        if (qrAlignmentManager == null || debugText == null)
+        {
+            return;
+        }
+
+        debugText.text = AlignmentReport.Detail(
+            qrAlignmentManager.LastResult, qrAlignmentManager.SampleCount);
+    }
+
+    private void ShowAlignmentStatus(string status)
+    {
+        if (debugText != null)
+        {
+            debugText.text = status;
         }
     }
 

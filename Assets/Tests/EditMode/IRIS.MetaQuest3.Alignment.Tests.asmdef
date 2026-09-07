@@ -1,0 +1,24 @@
+{
+    "name": "IRIS.MetaQuest3.Alignment.Tests",
+    "rootNamespace": "IRIS.MetaQuest3.Alignment.Tests",
+    "references": [
+        "IRIS.MetaQuest3.Alignment",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -22,6 +22,15 @@ TagManager:
   - QDSUIPrimaryButton
   - QDSUITextInvertedColor
   - QDSUITextSecondaryInvertedColor
+  - QDSUIBackplate
+  - QDSUILineDrawing
+  - QDSUIToggleThumbnail
+  - SamplesInfoPanel
+  - Locomotion
+  - PassThroughButton
+  - LocoButton
+  - LocoText
+  - PassThrough
   layers:
   - Default
   - TransparentFX

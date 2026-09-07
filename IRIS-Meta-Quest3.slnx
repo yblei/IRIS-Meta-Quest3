@@ -1,4 +1,9 @@
 ﻿<Solution>
+  <Project Path="meta.xr.mrutilitykit.editor.csproj" />
+  <Project Path="meta.xr.mrutilitykit.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="IRIS.MetaQuest3.Alignment.Tests.csproj" />
+  <Project Path="meta.xr.mrutilitykit.tests.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="IRIS.MetaQuest3.Alignment.csproj" />
 </Solution>
