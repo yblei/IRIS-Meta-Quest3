@@ -13,9 +13,6 @@ MonoBehaviour:
   m_Name: ImmersiveDebuggerSettings
   m_EditorClassIdentifier: 
   debugTypes:
-  - AssemblyName: Meta.XR.BuildingBlocks.AIBlocks
-    DebugTypes:
-    - Meta.XR.BuildingBlocks.AIBlocks.LlmAgentHelper
   - AssemblyName: Meta.XR.ImmersiveDebugger
     DebugTypes:
     - TestSceneUsage
@@ -30,6 +27,7 @@ MonoBehaviour:
   showConsole: 1
   followOverride: 1
   rotateOverride: 0
+  recenterOnToggle: 1
   showInfoLog: 1
   showWarningLog: 1
   showErrorLog: 1

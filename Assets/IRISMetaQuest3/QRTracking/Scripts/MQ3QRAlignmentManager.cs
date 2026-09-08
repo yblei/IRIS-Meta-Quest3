@@ -68,7 +68,11 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
 
     [Range(0.01f, 1f)]
     [Tooltip("Fraction of each refined pose applied per window. Lower values reduce jitter.")]
-    [SerializeField] private float refinementBlend = 0.25f;
+    [SerializeField] private float refinementBlend = 0.5f;
+
+    [Tooltip("Keep following the markers for as long as QR alignment is on. " +
+             "Turn off to lock the scene after the first successful alignment.")]
+    [SerializeField] private bool followMarkers = true;
 
     [Tooltip("Give up if the markers still have not been seen after this long.")]
     [SerializeField] private float timeoutSeconds = 60f;
@@ -390,7 +394,16 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
         MarkerSet set = MarkerSet.FromPayloads(
             environmentId, ids, firstAxisIndex, secondAxisIndex, originMode);
 
-        referenceGeometry.TryGetValue(environmentId, out MarkerGeometry reference);
+        // The learned-geometry check exists to catch a marker that has been
+        // knocked or misread between calibrations. While following, marker
+        // movement is exactly what we are tracking, so enforcing it would
+        // reject every move. The cost is that a misread marker can no longer
+        // be told apart from a deliberately moved one.
+        MarkerGeometry reference = null;
+        if (!followMarkers)
+        {
+            referenceGeometry.TryGetValue(environmentId, out reference);
+        }
 
         AlignmentResult result =
             MarkerAlignmentSolver.Solve(forEnvironment, set, tolerances, reference);
@@ -427,13 +440,18 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
             accumulator.Clear();
             collectionStartedAt = Time.time;
             windowEndsAt = Time.time + Mathf.Max(0.1f, refinementSeconds);
-            State = AlignmentState.Collecting;
+
+            // Keep collecting so the scene follows the markers; only stop when
+            // the operator switches alignment off, or when follow mode is
+            // disabled and the scene is meant to lock after one solve.
+            State = followMarkers ? AlignmentState.Collecting : AlignmentState.Locked;
 
             string offsetNote = CurrentOffset == Vector3.zero
                 ? string.Empty
                 : $" Offset ({CurrentOffset.x:F2}, {CurrentOffset.y:F2}, {CurrentOffset.z:F2}) m restored.";
 
-            SetStatus($"Refining {environmentId}: {AlignmentReport.Summary(result)}{offsetNote}");
+            SetStatus($"{(followMarkers ? "Following" : "Locked")} {environmentId}: " +
+                      $"{AlignmentReport.Summary(result)}{offsetNote}");
             Debug.Log($"[{nameof(MQ3QRAlignmentManager)}] {environmentId}\n" +
                       AlignmentReport.Detail(result, SampleCount));
             onAligned?.Invoke();
