@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.Events;
 using Meta.XR.MRUtilityKit;
 using IRIS.Node;
+using IRIS.MetaQuest3;
 using IRIS.MetaQuest3.Alignment;
 using IRIS.MetaQuest3.QRCodeDetection;
 
@@ -57,6 +58,24 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
     [Tooltip("Where the origin sits relative to the two axis markers.")]
     [SerializeField] private FrameOrigin originMode = FrameOrigin.MidpointOfAxisMarkers;
 
+    [Tooltip("Where up comes from. Gravity is far more accurate on a level surface; " +
+             "switch to FittedPlane only for markers on a deliberately angled surface.")]
+    [SerializeField] private UpAxisSource upAxis = UpAxisSource.Gravity;
+
+    [Header("Table height")]
+    [Tooltip("Take the origin's height from the scene's TABLE plane instead of the markers. " +
+             "Depth is the least accurate axis of a QR pose; the scene plane is static, so it " +
+             "is repeatable even where it is not perfectly accurate.")]
+    [SerializeField] private bool useSceneTableHeight = true;
+
+    [Tooltip("Ignore a table-height correction larger than this, in metres. Guards against " +
+             "snapping to the wrong surface.")]
+    [SerializeField] private float maxTableHeightCorrection = 0.15f;
+
+    [Tooltip("Outline the scene's TABLE surfaces while aligning, so it is obvious when the " +
+             "room model disagrees with the real table.")]
+    [SerializeField] private bool showTableOutline = true;
+
     [SerializeField] private AlignmentTolerances tolerances = AlignmentTolerances.Default;
 
     [Header("Calibration")]
@@ -107,6 +126,9 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
     private readonly MarkerSampleAccumulator accumulator = new MarkerSampleAccumulator();
 
     // Diagnostics: what MRUK is holding, so a failure says where it stopped.
+    private TablePlaneVisualizer tableOutline;
+    private float lastTableCorrection;
+    private bool lastTableHeightApplied;
     private int lastTrackableTotal;
     private int lastQrCodeCount;
     private int lastPayloadCount;
@@ -160,15 +182,27 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
             qrCodeManager.TrackingEnabled = true;
         }
 
+        // Show the marker overlays for as long as alignment is running, so the
+        // operator can see which markers are being picked up.
+        qrCodeManager.ShowMarkerVisuals = true;
+        SetTableOutlineVisible(true);
+
         BeginCollecting();
     }
 
     public void StopQRAlignment()
     {
-        if (qrCodeManager != null && qrCodeManager.TrackingEnabled)
+        if (qrCodeManager != null)
         {
-            qrCodeManager.TrackingEnabled = false;
+            if (qrCodeManager.TrackingEnabled)
+            {
+                qrCodeManager.TrackingEnabled = false;
+            }
+
+            qrCodeManager.ShowMarkerVisuals = false;
         }
+
+        SetTableOutlineVisible(false);
 
         // Keep a completed alignment's readout rather than wiping what the
         // operator just earned.
@@ -189,18 +223,7 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
     /// <summary>Discards every marker sample and camera ray, then starts a fresh scan.</summary>
     public void ResetDetections()
     {
-        if (qrCodeManager == null)
-        {
-            SetStatus("No QR code manager assigned.");
-            return;
-        }
-
-        if (!qrCodeManager.TrackingEnabled)
-        {
-            qrCodeManager.TrackingEnabled = true;
-        }
-
-        BeginCollecting();
+        StartQRAlignment();
     }
 
     /// <summary>
@@ -392,7 +415,7 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
         }
 
         MarkerSet set = MarkerSet.FromPayloads(
-            environmentId, ids, firstAxisIndex, secondAxisIndex, originMode);
+            environmentId, ids, firstAxisIndex, secondAxisIndex, originMode, upAxis);
 
         // The learned-geometry check exists to catch a marker that has been
         // knocked or misread between calibrations. While following, marker
@@ -415,11 +438,40 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
                                 CurrentEnvironmentId == environmentId;
 
             CurrentEnvironmentId = environmentId;
+
+            // Markers give a poor height: depth is the weakest axis of a planar
+            // fiducial's pose, and it lands straight in the DOF that decides
+            // whether a grasp succeeds. The scene's TABLE plane comes from Space
+            // Setup, so it does not get re-estimated per run - it may carry a
+            // fixed bias, but it is repeatable, and a fixed bias is what the
+            // per-environment offset is for.
+            Pose measured = result.Pose;
+            lastTableHeightApplied = false;
+            lastTableCorrection = 0f;
+
+            if (useSceneTableHeight && TryGetSceneTableHeight(measured.position, out float tableY))
+            {
+                float correction = tableY - measured.position.y;
+                if (Mathf.Abs(correction) <= maxTableHeightCorrection)
+                {
+                    measured.position.y = tableY;
+                    lastTableCorrection = correction;
+                    lastTableHeightApplied = true;
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        $"[{nameof(MQ3QRAlignmentManager)}] ignoring table-height correction of " +
+                        $"{correction * 100f:F1} cm (limit {maxTableHeightCorrection * 100f:F0} cm); " +
+                        "the nearest TABLE surface is probably not the one the markers are on.");
+                }
+            }
+
             solvedPose = isRefinement
                 ? new Pose(
-                    Vector3.Lerp(solvedPose.position, result.Pose.position, refinementBlend),
-                    Quaternion.Slerp(solvedPose.rotation, result.Pose.rotation, refinementBlend))
-                : result.Pose;
+                    Vector3.Lerp(solvedPose.position, measured.position, refinementBlend),
+                    Quaternion.Slerp(solvedPose.rotation, measured.rotation, refinementBlend))
+                : measured;
             hasSolvedPose = true;
 
             if (!isRefinement)
@@ -450,8 +502,12 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
                 ? string.Empty
                 : $" Offset ({CurrentOffset.x:F2}, {CurrentOffset.y:F2}, {CurrentOffset.z:F2}) m restored.";
 
+            string tableNote = lastTableHeightApplied
+                ? $" Table height {lastTableCorrection * 100f:+0.0;-0.0} cm."
+                : useSceneTableHeight ? " No TABLE surface found." : string.Empty;
+
             SetStatus($"{(followMarkers ? "Following" : "Locked")} {environmentId}: " +
-                      $"{AlignmentReport.Summary(result)}{offsetNote}");
+                      $"{AlignmentReport.Summary(result)}{tableNote}{offsetNote}");
             Debug.Log($"[{nameof(MQ3QRAlignmentManager)}] {environmentId}\n" +
                       AlignmentReport.Detail(result, SampleCount));
             onAligned?.Invoke();
@@ -541,6 +597,61 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
         Target.SetPositionAndRotation(
             solvedPose.position + (solvedPose.rotation * CurrentOffset),
             solvedPose.rotation);
+    }
+
+    /// <summary>
+    /// Height of the scene's TABLE surface beneath a point, from Space Setup's
+    /// room model. Casts downward from above the point so the surface directly
+    /// under the markers wins rather than whichever table happens to be nearest.
+    /// </summary>
+    private bool TryGetSceneTableHeight(Vector3 nearPosition, out float height)
+    {
+        height = 0f;
+
+        MRUK mruk = MRUK.Instance;
+        MRUKRoom room = mruk != null ? mruk.GetCurrentRoom() : null;
+        if (room == null)
+        {
+            return false;
+        }
+
+        var ray = new Ray(nearPosition + (Vector3.up * 0.5f), Vector3.down);
+        LabelFilter tables = LabelFilter.Included(MRUKAnchor.SceneLabels.TABLE);
+
+        if (!room.Raycast(ray, 1.5f, tables, out RaycastHit hit))
+        {
+            return false;
+        }
+
+        height = hit.point.y;
+        return true;
+    }
+
+    private void SetTableOutlineVisible(bool visible)
+    {
+        if (!showTableOutline && visible)
+        {
+            return;
+        }
+
+        if (tableOutline == null)
+        {
+            if (!visible)
+            {
+                return;
+            }
+
+            tableOutline = gameObject.AddComponent<TablePlaneVisualizer>();
+        }
+
+        if (visible)
+        {
+            tableOutline.Show();
+        }
+        else
+        {
+            tableOutline.Hide();
+        }
     }
 
     private void SetStatus(string message)

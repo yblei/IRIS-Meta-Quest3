@@ -170,6 +170,17 @@ namespace IRIS.MetaQuest3.Alignment
                 normal = -normal;
             }
 
+            // How far the markers' own surface sits off level. Kept whichever
+            // up axis is applied, because it is the useful diagnostic either
+            // way: with gravity it says how out-of-level the table is, with the
+            // fitted plane it says how much tilt the scene inherited.
+            float surfaceTilt = Vector3.Angle(normal, Vector3.up);
+
+            // NOTE: the coplanarity residual below must be measured against
+            // this fitted normal, because it asks whether the markers are
+            // coplanar with each other - a question independent of which up
+            // axis the scene ends up using.
+
             // --- residuals --------------------------------------------------
 
             float sumSquared = 0f;
@@ -236,7 +247,19 @@ namespace IRIS.MetaQuest3.Alignment
                     byId.Count);
             }
 
-            // Project the baseline into the fitted plane so X is exactly
+            // Gravity beats a plane fitted through a handful of noisy marker
+            // positions by an order of magnitude, and it does not drift. Use it
+            // for up wherever the surface is meant to be level, leaving the
+            // markers to do what they are good at: position and yaw. Done here,
+            // after the plane has been fitted and the residuals checked, so the
+            // coplanarity test still judges the markers against their own plane.
+            bool useGravity = markers.UpAxis == UpAxisSource.Gravity;
+            if (useGravity)
+            {
+                normal = Vector3.up;
+            }
+
+            // Project the baseline into the applied plane so X is exactly
             // perpendicular to the normal rather than merely close to it.
             Vector3 x = baseline - normal * Vector3.Dot(baseline, normal);
             if (x.sqrMagnitude < 1e-10f)
@@ -268,7 +291,8 @@ namespace IRIS.MetaQuest3.Alignment
                 Status = AlignmentStatus.Success,
                 Pose = new Pose(origin, Quaternion.LookRotation(forward, normal)),
                 Normal = normal,
-                TiltFromGravityDeg = Vector3.Angle(normal, Vector3.up),
+                TiltFromGravityDeg = surfaceTilt,
+                UsedGravityForUp = useGravity,
                 PlaneResidualRms = residualRms,
                 MaxPlaneResidual = maxResidual,
                 WorstMarkerId = namedOutlier,
@@ -281,7 +305,8 @@ namespace IRIS.MetaQuest3.Alignment
                 WasCrossChecked = reference != null || points.Length >= 4,
                 Message =
                     $"Aligned from {points.Length} markers. " +
-                    $"Tilt {Vector3.Angle(normal, Vector3.up):F2} deg, " +
+                    $"surface tilt {surfaceTilt:F2} deg" +
+                    $"{(useGravity ? " (up from gravity)" : string.Empty)}, " +
                     $"residual {residualRms * 1000f:F1} mm.",
             };
         }

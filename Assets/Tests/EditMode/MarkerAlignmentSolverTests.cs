@@ -13,7 +13,9 @@ namespace IRIS.MetaQuest3.Alignment.Tests
         private const string M3 = "IRIS_3";
         private const string Centre = "IRIS_C";
 
-        private static MarkerSet Set(params string[] ids)
+        private static MarkerSet Set(params string[] ids) => Set(UpAxisSource.Gravity, ids);
+
+        private static MarkerSet Set(UpAxisSource upAxis, params string[] ids)
         {
             return new MarkerSet
             {
@@ -22,6 +24,7 @@ namespace IRIS.MetaQuest3.Alignment.Tests
                 SecondAxisMarkerId = ids[1],
                 MarkerIds = new List<string>(ids),
                 OriginMode = FrameOrigin.AtFirstMarker,
+                UpAxis = upAxis,
             };
         }
 
@@ -75,8 +78,11 @@ namespace IRIS.MetaQuest3.Alignment.Tests
         }
 
         [Test]
-        public void TiltedSurface_RecoversTheTiltAngle()
+        public void TiltedSurface_ReportsItsTilt_ButTakesUpFromGravity()
         {
+            // Gravity is an absolute reference and beats a normal fitted
+            // through noisy marker positions, so the applied frame is exactly
+            // level and the surface tilt becomes a diagnostic instead.
             const float tilt = 7.5f;
             Quaternion rotation = Quaternion.Euler(tilt, 33f, 0f);
 
@@ -86,8 +92,47 @@ namespace IRIS.MetaQuest3.Alignment.Tests
                 AlignmentTolerances.Default);
 
             Assert.AreEqual(AlignmentStatus.Success, result.Status, result.Message);
+            Assert.IsTrue(result.UsedGravityForUp);
+            Assert.AreEqual(tilt, result.TiltFromGravityDeg, 1e-2f,
+                "the surface tilt should still be reported");
+            Assert.AreEqual(0f, Vector3.Angle(result.Normal, Vector3.up), 1e-3f,
+                "the applied up axis should be gravity, not the marker plane");
+        }
+
+        [Test]
+        public void TiltedSurface_FollowsTheMarkerPlane_WhenUpComesFromTheFit()
+        {
+            // For markers deliberately mounted on an angled surface, the fitted
+            // plane is the only sensible source of up.
+            const float tilt = 7.5f;
+            Quaternion rotation = Quaternion.Euler(tilt, 33f, 0f);
+
+            AlignmentResult result = MarkerAlignmentSolver.Solve(
+                Place(rotation, new Vector3(1f, 0.7f, -2f), Rectangle()),
+                Set(UpAxisSource.FittedPlane, M0, M1, M2, M3),
+                AlignmentTolerances.Default);
+
+            Assert.AreEqual(AlignmentStatus.Success, result.Status, result.Message);
+            Assert.IsFalse(result.UsedGravityForUp);
             Assert.AreEqual(tilt, result.TiltFromGravityDeg, 1e-2f);
-            Assert.AreEqual(0f, Vector3.Angle(result.Normal, rotation * Vector3.up), 1e-2f);
+            Assert.AreEqual(0f, Vector3.Angle(result.Normal, rotation * Vector3.up), 1e-2f,
+                "the applied up axis should follow the marker plane");
+        }
+
+        [Test]
+        public void CoplanarityIsJudgedAgainstTheMarkerPlane_NotGravity()
+        {
+            // A tilted but perfectly flat sheet must not be reported as
+            // non-coplanar just because the scene takes up from gravity.
+            Quaternion rotation = Quaternion.Euler(12f, 40f, 0f);
+
+            AlignmentResult result = MarkerAlignmentSolver.Solve(
+                Place(rotation, Vector3.zero, Rectangle()),
+                Set(M0, M1, M2, M3),
+                AlignmentTolerances.Default);
+
+            Assert.AreEqual(AlignmentStatus.Success, result.Status, result.Message);
+            Assert.AreEqual(0f, result.PlaneResidualRms, 1e-4f);
         }
 
         [Test]

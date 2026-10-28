@@ -42,6 +42,7 @@ namespace IRIS.MetaQuest3.QRCodeDetection
 
         private Dictionary<string, MRUKTrackable> _trackedQRCodes = new Dictionary<string, MRUKTrackable>();
         private readonly List<MRUKTrackable> _mrukTrackables = new List<MRUKTrackable>();
+        private readonly Dictionary<MRUKTrackable, QRCode> _overlays = new Dictionary<MRUKTrackable, QRCode>();
 
 
         [SerializeField]
@@ -126,7 +127,62 @@ namespace IRIS.MetaQuest3.QRCodeDetection
             // debug decoration from Meta's sample. Alignment reads marker poses
             // straight from MRUK and does not need it, so it stays off unless
             // someone is diagnosing detection.
-            if (!_showMarkerVisuals || _qrCodePrefab == null)
+            if (_showMarkerVisuals)
+            {
+                AddOverlay(trackable);
+            }
+        }
+
+        /// <summary>
+        /// Shows or hides the overlay on every detected marker, including ones
+        /// detected before the switch. The alignment manager turns this on
+        /// while it is collecting so the operator can see what is picked up.
+        /// </summary>
+        public bool ShowMarkerVisuals
+        {
+            get => _showMarkerVisuals;
+            set
+            {
+                if (_showMarkerVisuals == value)
+                {
+                    return;
+                }
+
+                _showMarkerVisuals = value;
+
+                if (!value)
+                {
+                    foreach (QRCode overlay in _overlays.Values)
+                    {
+                        if (overlay)
+                        {
+                            Destroy(overlay.gameObject);
+                        }
+                    }
+
+                    _overlays.Clear();
+                    return;
+                }
+
+                if (!_mrukInstance)
+                {
+                    return;
+                }
+
+                _mrukInstance.GetTrackables(_mrukTrackables);
+                foreach (MRUKTrackable trackable in _mrukTrackables)
+                {
+                    if (trackable && trackable.TrackableType == OVRAnchor.TrackableType.QRCode)
+                    {
+                        AddOverlay(trackable);
+                    }
+                }
+            }
+        }
+
+        void AddOverlay(MRUKTrackable trackable)
+        {
+            if (_qrCodePrefab == null || (_overlays.TryGetValue(trackable, out QRCode existing) && existing))
             {
                 return;
             }
@@ -138,6 +194,8 @@ namespace IRIS.MetaQuest3.QRCodeDetection
             {
                 visualizer.Initialize(trackable);
             }
+
+            _overlays[trackable] = qrCode;
         }
 
         public void OnTrackableRemoved(MRUKTrackable trackable)
@@ -147,6 +205,7 @@ namespace IRIS.MetaQuest3.QRCodeDetection
                 return;
             }
             _trackedQRCodes.Remove(trackable.MarkerPayloadString);
+            _overlays.Remove(trackable);
 
             Debug.Log($"{nameof(OnTrackableRemoved)}: {trackable.Anchor.Uuid.ToString("N").Remove(8)}[..]");
 

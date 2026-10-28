@@ -52,6 +52,20 @@ namespace IRIS.MetaQuest3.Alignment
         }
     }
 
+    /// <summary>Where the scene's up axis comes from.</summary>
+    public enum UpAxisSource
+    {
+        /// Gravity. Meta's tracking space is gravity-aligned, so world up is an
+        /// absolute, drift-free reference accurate to a fraction of a degree -
+        /// far better than a normal fitted through a few noisy marker
+        /// positions. Correct whenever the surface is meant to be level.
+        Gravity,
+
+        /// The normal of the plane fitted through the markers. Needed when the
+        /// markers sit on a surface that is deliberately not horizontal.
+        FittedPlane,
+    }
+
     /// <summary>Where the scene origin sits relative to the two axis markers.</summary>
     public enum FrameOrigin
     {
@@ -92,6 +106,10 @@ namespace IRIS.MetaQuest3.Alignment
         [Tooltip("Where the origin sits relative to the two axis markers.")]
         public FrameOrigin OriginMode = FrameOrigin.MidpointOfAxisMarkers;
 
+        [Tooltip("Where up comes from. Gravity is far more accurate on a level surface; " +
+                 "use FittedPlane only for markers on a deliberately angled surface.")]
+        public UpAxisSource UpAxis = UpAxisSource.Gravity;
+
         public bool Contains(string id)
         {
             return MarkerIds != null && MarkerIds.Contains(id);
@@ -107,7 +125,8 @@ namespace IRIS.MetaQuest3.Alignment
             IEnumerable<string> payloads,
             int firstAxisIndex,
             int secondAxisIndex,
-            FrameOrigin originMode = FrameOrigin.MidpointOfAxisMarkers)
+            FrameOrigin originMode = FrameOrigin.MidpointOfAxisMarkers,
+            UpAxisSource upAxis = UpAxisSource.Gravity)
         {
             var ids = new List<string>(payloads);
             ids.Sort(StringComparer.Ordinal);
@@ -119,6 +138,7 @@ namespace IRIS.MetaQuest3.Alignment
                 FirstAxisMarkerId = MarkerPayloadParser.Compose(environmentId, firstAxisIndex),
                 SecondAxisMarkerId = MarkerPayloadParser.Compose(environmentId, secondAxisIndex),
                 OriginMode = originMode,
+                UpAxis = upAxis,
             };
         }
 
@@ -225,10 +245,18 @@ namespace IRIS.MetaQuest3.Alignment
         /// Fitted plane normal in world space, oriented away from the floor.
         public Vector3 Normal;
 
-        /// Angle between the fitted normal and gravity, in degrees. Meta's
+        /// Angle between the FITTED plane normal and gravity, in degrees.
+        /// Reported whichever up axis was actually applied, so it always means
+        /// "how far off level is the surface the markers are on". Meta's
         /// tracking space is gravity-aligned, so world up is the gravity vector
-        /// and this needs no IMU of its own. This is the headline quality number.
+        /// and this needs no IMU of its own.
         public float TiltFromGravityDeg;
+
+        /// Whether gravity was used for the up axis rather than the fitted
+        /// plane normal. When true, the applied frame is exactly level and
+        /// <see cref="TiltFromGravityDeg"/> is a diagnostic about the surface
+        /// rather than an error in the alignment.
+        public bool UsedGravityForUp;
 
         /// RMS distance from the markers to the fitted plane, in metres.
         public float PlaneResidualRms;
