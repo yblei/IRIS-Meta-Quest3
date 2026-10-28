@@ -47,6 +47,10 @@ namespace IRIS.MetaQuest3.QRCodeDetection
         [SerializeField]
         QRCode _qrCodePrefab;
 
+        [SerializeField, Tooltip("Draw the outline, label and axis gizmo on each detected marker. " +
+                                 "Debug aid only - alignment does not need it.")]
+        bool _showMarkerVisuals = false;
+
         // [SerializeField]
         // QRCodeSampleUI _uiInstance;
 
@@ -117,11 +121,23 @@ namespace IRIS.MetaQuest3.QRCodeDetection
 
             _trackedQRCodes[trackable.MarkerPayloadString] = trackable;
             Debug.Log($"{nameof(OnTrackableAdded)}: QRCode tracked! Text: {trackable.MarkerPayloadString}");
-            QRCode qrCode = Instantiate(_qrCodePrefab, trackable.transform);
-            // QRCode qrCode = qrCode.GetComponent<QRCode>();
-            qrCode.Initialize(trackable);
-            qrCode.GetComponent<Bounded2DVisualizer>().Initialize(trackable);
 
+            // The marker overlay (outline, payload label and RGB axis gizmo) is
+            // debug decoration from Meta's sample. Alignment reads marker poses
+            // straight from MRUK and does not need it, so it stays off unless
+            // someone is diagnosing detection.
+            if (!_showMarkerVisuals || _qrCodePrefab == null)
+            {
+                return;
+            }
+
+            QRCode qrCode = Instantiate(_qrCodePrefab, trackable.transform);
+            qrCode.Initialize(trackable);
+
+            if (qrCode.TryGetComponent(out Bounded2DVisualizer visualizer))
+            {
+                visualizer.Initialize(trackable);
+            }
         }
 
         public void OnTrackableRemoved(MRUKTrackable trackable)
