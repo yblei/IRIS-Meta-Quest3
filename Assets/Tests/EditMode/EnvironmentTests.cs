@@ -102,6 +102,46 @@ namespace IRIS.MetaQuest3.Alignment.Tests
         }
 
         [Test]
+        public void SceneOffsets_SurviveAReload()
+        {
+            var store = new EnvironmentStore(path);
+            store.SetSceneOffset("VENTION", new Vector3(0.012f, -0.003f, 0.02f), new Vector3(0f, 0f, 2f));
+            store.Save();
+
+            var reopened = new EnvironmentStore(path);
+
+            Assert.IsTrue(reopened.TryGetSceneOffset("VENTION", out Vector3 position, out Vector3 rotation));
+            Assert.AreEqual(0.012f, position.x, 1e-5f);
+            Assert.AreEqual(-0.003f, position.y, 1e-5f);
+            Assert.AreEqual(0.02f, position.z, 1e-5f);
+            Assert.AreEqual(2f, rotation.z, 1e-5f);
+        }
+
+        [Test]
+        public void SceneOffset_UpdatesReplaceThePreviousValue()
+        {
+            var store = new EnvironmentStore(path);
+            store.SetSceneOffset("VENTION", Vector3.one, Vector3.zero);
+            store.SetSceneOffset("VENTION", Vector3.up, Vector3.right);
+            store.Save();
+
+            Assert.IsTrue(new EnvironmentStore(path).TryGetSceneOffset("VENTION", out Vector3 position, out Vector3 rotation));
+            Assert.AreEqual(Vector3.up, position);
+            Assert.AreEqual(Vector3.right, rotation);
+        }
+
+        [Test]
+        public void SceneOffset_AbsentUntilSet()
+        {
+            var store = new EnvironmentStore(path);
+            store.SetOffset("VENTION", Vector3.one);
+
+            Assert.IsFalse(store.TryGetSceneOffset("VENTION", out _, out _),
+                "an environment with only a nudge must not restore a zero scene offset as if dialed in");
+            Assert.IsFalse(store.TryGetSceneOffset("CELL_A", out _, out _));
+        }
+
+        [Test]
         public void MissingFile_StartsEmptyRatherThanThrowing()
         {
             Assert.DoesNotThrow(() => new EnvironmentStore(path));

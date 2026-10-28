@@ -15,6 +15,13 @@ namespace IRIS.MetaQuest3.Alignment
         /// frame, so it stays correct wherever the table sits in the room.
         public Vector3 Offset;
 
+        /// Operator-dialed scene offset (IRISOrigin's SceneOffset: x/y/z in
+        /// metres, rotX/rotY/rotZ in degrees). Kept as raw values so this
+        /// assembly needs no reference to IRIS.Node.
+        public bool HasSceneOffset;
+        public Vector3 SceneOffsetPosition;
+        public Vector3 SceneOffsetRotation;
+
         public string LastAlignedUtc;
     }
 
@@ -62,9 +69,56 @@ namespace IRIS.MetaQuest3.Alignment
 
         public void SetOffset(string environmentId, Vector3 offset)
         {
-            if (string.IsNullOrEmpty(environmentId))
+            EnvironmentProfile profile = GetOrCreate(environmentId);
+            if (profile == null)
             {
                 return;
+            }
+
+            profile.Offset = offset;
+            profile.LastAlignedUtc = DateTime.UtcNow.ToString("o");
+            Save();
+        }
+
+        public bool TryGetSceneOffset(string environmentId, out Vector3 position, out Vector3 rotation)
+        {
+            if (!string.IsNullOrEmpty(environmentId) &&
+                profiles.TryGetValue(environmentId, out EnvironmentProfile profile) &&
+                profile.HasSceneOffset)
+            {
+                position = profile.SceneOffsetPosition;
+                rotation = profile.SceneOffsetRotation;
+                return true;
+            }
+
+            position = Vector3.zero;
+            rotation = Vector3.zero;
+            return false;
+        }
+
+        /// <summary>
+        /// Records the scene offset without writing to disk, so slider drags do
+        /// not hit storage every frame. Call <see cref="Save"/> to persist.
+        /// </summary>
+        public void SetSceneOffset(string environmentId, Vector3 position, Vector3 rotation)
+        {
+            EnvironmentProfile profile = GetOrCreate(environmentId);
+            if (profile == null)
+            {
+                return;
+            }
+
+            profile.HasSceneOffset = true;
+            profile.SceneOffsetPosition = position;
+            profile.SceneOffsetRotation = rotation;
+            profile.LastAlignedUtc = DateTime.UtcNow.ToString("o");
+        }
+
+        private EnvironmentProfile GetOrCreate(string environmentId)
+        {
+            if (string.IsNullOrEmpty(environmentId))
+            {
+                return null;
             }
 
             if (!profiles.TryGetValue(environmentId, out EnvironmentProfile profile))
@@ -73,9 +127,7 @@ namespace IRIS.MetaQuest3.Alignment
                 profiles.Add(environmentId, profile);
             }
 
-            profile.Offset = offset;
-            profile.LastAlignedUtc = DateTime.UtcNow.ToString("o");
-            Save();
+            return profile;
         }
 
         public void Forget(string environmentId)
@@ -102,7 +154,16 @@ namespace IRIS.MetaQuest3.Alignment
                     Directory.CreateDirectory(directory);
                 }
 
-                File.WriteAllText(filePath, JsonUtility.ToJson(list, true));
+                // Write then swap, so a headset killed mid-write cannot leave a
+                // truncated file that would wipe every remembered offset.
+                string temporary = filePath + ".tmp";
+                File.WriteAllText(temporary, JsonUtility.ToJson(list, true));
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+
+                File.Move(temporary, filePath);
             }
             catch (Exception e)
             {

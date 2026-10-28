@@ -48,6 +48,14 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
     [Tooltip("Transform moved to align the scene. Falls back to this object's own transform.")]
     [SerializeField] private Transform sceneRoot;
 
+    [Tooltip("Origin whose dialed-in offset is remembered per environment. " +
+             "Falls back to one on this object, then any in the scene.")]
+    [SerializeField] private IRISOrigin irisOrigin;
+
+    [Tooltip("Delay before a changed offset is written to disk, so slider drags " +
+             "do not write every frame.")]
+    [SerializeField] private float offsetSaveDelaySeconds = 0.5f;
+
     [Header("Marker sheet")]
     [Tooltip("Marker index that starts the axis. The robot sits between this and the next.")]
     [SerializeField] private int firstAxisIndex = 1;
@@ -145,14 +153,74 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
     private float nextProgressAt;
     private bool hasAlignedThisSession;
 
+    // Last offset IRISOrigin applied, whoever applied it (menu sliders, the
+    // network service, or a restore from the store).
+    private SceneOffset lastSceneOffset;
+    private bool restoringSceneOffset;
+    private bool sceneOffsetDirty;
+    private float sceneOffsetSaveAt;
+
     private Transform Target => sceneRoot != null ? sceneRoot : transform;
 
     private EnvironmentStore Store =>
         store ??= new EnvironmentStore(
             Path.Combine(Application.persistentDataPath, "iris-environments.json"));
 
+    private void Start()
+    {
+        if (irisOrigin == null)
+        {
+            irisOrigin = GetComponent<IRISOrigin>();
+        }
+
+        if (irisOrigin == null)
+        {
+            irisOrigin = FindFirstObjectByType<IRISOrigin>();
+        }
+
+        if (irisOrigin != null)
+        {
+            irisOrigin.OnOffsetApplied += OnSceneOffsetApplied;
+        }
+        else
+        {
+            Debug.LogWarning($"[{nameof(MQ3QRAlignmentManager)}] no IRISOrigin found; " +
+                             "dialed-in offsets will not be remembered.");
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (irisOrigin != null)
+        {
+            irisOrigin.OnOffsetApplied -= OnSceneOffsetApplied;
+        }
+
+        FlushSceneOffset();
+    }
+
+    // Quest apps are usually suspended or killed rather than quit, so pause is
+    // the last reliable moment to write.
+    private void OnApplicationPause(bool paused)
+    {
+        if (paused)
+        {
+            FlushSceneOffset();
+        }
+    }
+
+    private void OnApplicationQuit()
+    {
+        FlushSceneOffset();
+    }
+
     private void Update()
     {
+        if (sceneOffsetDirty && Time.unscaledTime >= sceneOffsetSaveAt)
+        {
+            FlushSceneOffset();
+        }
+
         if (State != AlignmentState.Collecting)
         {
             return;
@@ -313,6 +381,94 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
         SetStatus($"Cleared saved offset for {CurrentEnvironmentId}.");
     }
 
+    // ---- remembered scene offsets (IRISOrigin) ------------------------------
+
+    private void OnSceneOffsetApplied(SceneOffset offset)
+    {
+        lastSceneOffset = offset;
+
+        // Our own restore needs no write-back; before any environment is known
+        // there is nothing to file the offset under yet. It is adopted by the
+        // first environment recognised (see RestoreSceneOffset).
+        if (restoringSceneOffset || offset == null || string.IsNullOrEmpty(CurrentEnvironmentId))
+        {
+            return;
+        }
+
+        Store.SetSceneOffset(CurrentEnvironmentId,
+            new Vector3(offset.x, offset.y, offset.z),
+            new Vector3(offset.rotX, offset.rotY, offset.rotZ));
+        sceneOffsetDirty = true;
+        sceneOffsetSaveAt = Time.unscaledTime + Mathf.Max(0f, offsetSaveDelaySeconds);
+    }
+
+    private void FlushSceneOffset()
+    {
+        if (!sceneOffsetDirty)
+        {
+            return;
+        }
+
+        sceneOffsetDirty = false;
+        Store.Save();
+    }
+
+    /// <summary>
+    /// Called when alignment switches to <paramref name="environmentId"/>.
+    /// Applies its remembered offset; an environment seen for the first time
+    /// adopts whatever is dialed in when nothing else was aligned before, and
+    /// starts from zero when coming from another environment, so one site's
+    /// offset never leaks into another's.
+    /// </summary>
+    /// <returns>True if a remembered offset was applied.</returns>
+    private bool RestoreSceneOffset(string environmentId, string previousEnvironmentId)
+    {
+        if (irisOrigin == null)
+        {
+            return false;
+        }
+
+        // Anything still pending belongs to the environment being left.
+        FlushSceneOffset();
+
+        if (Store.TryGetSceneOffset(environmentId, out Vector3 position, out Vector3 rotation))
+        {
+            ApplySceneOffsetWithoutSaving(new SceneOffset
+            {
+                x = position.x, y = position.y, z = position.z,
+                rotX = rotation.x, rotY = rotation.y, rotZ = rotation.z,
+            });
+            return true;
+        }
+
+        if (string.IsNullOrEmpty(previousEnvironmentId))
+        {
+            if (lastSceneOffset != null)
+            {
+                OnSceneOffsetApplied(lastSceneOffset);
+            }
+        }
+        else
+        {
+            ApplySceneOffsetWithoutSaving(new SceneOffset());
+        }
+
+        return false;
+    }
+
+    private void ApplySceneOffsetWithoutSaving(SceneOffset offset)
+    {
+        restoringSceneOffset = true;
+        try
+        {
+            irisOrigin.ApplyAlignmentOffset(offset);
+        }
+        finally
+        {
+            restoringSceneOffset = false;
+        }
+    }
+
     // ---- calibration ------------------------------------------------------
 
     private void BeginCollecting()
@@ -437,7 +593,14 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
             bool isRefinement = hasAlignedThisSession &&
                                 CurrentEnvironmentId == environmentId;
 
+            string previousEnvironmentId = CurrentEnvironmentId;
             CurrentEnvironmentId = environmentId;
+
+            bool sceneOffsetRestored = false;
+            if (previousEnvironmentId != environmentId)
+            {
+                sceneOffsetRestored = RestoreSceneOffset(environmentId, previousEnvironmentId);
+            }
 
             // Markers give a poor height: depth is the weakest axis of a planar
             // fiducial's pose, and it lands straight in the DOF that decides
@@ -501,6 +664,11 @@ public class MQ3QRAlignmentManager : Singleton<MQ3QRAlignmentManager>
             string offsetNote = CurrentOffset == Vector3.zero
                 ? string.Empty
                 : $" Offset ({CurrentOffset.x:F2}, {CurrentOffset.y:F2}, {CurrentOffset.z:F2}) m restored.";
+
+            if (sceneOffsetRestored)
+            {
+                offsetNote += $" Saved {environmentId} offset restored.";
+            }
 
             string tableNote = lastTableHeightApplied
                 ? $" Table height {lastTableCorrection * 100f:+0.0;-0.0} cm."
