@@ -122,3 +122,9 @@ Assets/Scenes/UISet.unity
 Assets/Scenes/UISet.unity.meta
 Assets/Scenes/UISetPatterns.unity
 Assets/Scenes/UISetPatterns.unity.meta
+
+markers.pdf
+
+# Meta SDK per-machine settings (contains an access token)
+Assets/Resources/DevAgentSettings.asset
+Assets/Resources/DevAgentSettings.asset.meta

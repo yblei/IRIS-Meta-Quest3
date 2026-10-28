@@ -4,23 +4,82 @@
 One marker per A4 page, drawn as vector so module edges stay crisp at any
 print size. Includes a 100 mm ruler so a mis-scaled printout is obvious.
 """
-import sys
-import qrcode
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
+import argparse
 
-ENVIRONMENT = sys.argv[1] if len(sys.argv) > 1 else "VENTION"
-COUNT = int(sys.argv[2]) if len(sys.argv) > 2 else 4
-OUT = sys.argv[3] if len(sys.argv) > 3 else "markers.pdf"
 
-QR_MM = float(sys.argv[4]) if len(sys.argv) > 4 else 160.0
-PAGE_W, PAGE_H = A4
+class HelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter,
+    argparse.RawDescriptionHelpFormatter,
+):
+    pass
 
-# An A4 sheet can print about 190 mm across. Anything larger is split over a
-# 2x2 grid of sheets to be taped together, which is how you get a marker big
-# enough to be detected from across a table.
-TILE = QR_MM > 185.0
+
+def positive_int(value):
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def positive_float(value):
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return parsed
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="Generate printable A4 QR markers for IRIS alignment.",
+        formatter_class=HelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  %(prog)s\n"
+            "  %(prog)s VENTION 4 markers.pdf\n"
+            "  %(prog)s CELL_A 4 cell-a.pdf 240"
+        ),
+    )
+    parser.add_argument(
+        "environment",
+        nargs="?",
+        default="VENTION",
+        help="environment identifier embedded in each marker",
+    )
+    parser.add_argument(
+        "count",
+        nargs="?",
+        type=positive_int,
+        default=4,
+        help="number of markers to generate",
+    )
+    parser.add_argument(
+        "output",
+        nargs="?",
+        default="markers.pdf",
+        help="output PDF path",
+    )
+    parser.add_argument(
+        "size_mm",
+        nargs="?",
+        type=positive_float,
+        default=160.0,
+        help="assembled QR size in millimetres; sizes above 185 use four sheets",
+    )
+    return parser
+
+
+def load_rendering_dependencies(parser):
+    global qrcode, A4, mm, canvas
+    try:
+        import qrcode
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas
+    except ModuleNotFoundError as error:
+        parser.error(
+            f"missing dependency '{error.name}'; install with: "
+            "python3 -m pip install qrcode reportlab"
+        )
 
 
 def draw_qr(c, payload, x_mm, y_mm, size_mm):
@@ -187,16 +246,40 @@ def tiled_marker_pages(c, payload):
             c.showPage()
 
 
-c = canvas.Canvas(OUT, pagesize=A4)
-c.setTitle(f"IRIS alignment markers - {ENVIRONMENT}")
-cover(c)
-for i in range(1, COUNT + 1):
-    payload = f"{ENVIRONMENT}_{i}"
-    if TILE:
-        tiled_marker_pages(c, payload)
-    else:
-        marker_page(c, payload)
-c.save()
-sheets = COUNT * (4 if TILE else 1) + 1
-print(f"wrote {OUT}: {COUNT} markers at {QR_MM:.0f} mm"
-      f"{' (tiled over 4 sheets each)' if TILE else ''}, {sheets} pages")
+def main(argv=None):
+    global ENVIRONMENT, COUNT, OUT, QR_MM, PAGE_W, PAGE_H, TILE
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.environment.strip():
+        parser.error("environment must not be empty")
+
+    load_rendering_dependencies(parser)
+    ENVIRONMENT = args.environment
+    COUNT = args.count
+    OUT = args.output
+    QR_MM = args.size_mm
+    PAGE_W, PAGE_H = A4
+
+    # An A4 sheet can print about 190 mm across. Anything larger is split over
+    # a 2x2 grid of sheets to be taped together.
+    TILE = QR_MM > 185.0
+
+    pdf = canvas.Canvas(OUT, pagesize=A4)
+    pdf.setTitle(f"IRIS alignment markers - {ENVIRONMENT}")
+    cover(pdf)
+    for marker_index in range(1, COUNT + 1):
+        payload = f"{ENVIRONMENT}_{marker_index}"
+        if TILE:
+            tiled_marker_pages(pdf, payload)
+        else:
+            marker_page(pdf, payload)
+    pdf.save()
+
+    sheets = COUNT * (4 if TILE else 1) + 1
+    print(f"wrote {OUT}: {COUNT} markers at {QR_MM:.0f} mm"
+          f"{' (tiled over 4 sheets each)' if TILE else ''}, {sheets} pages")
+
+
+if __name__ == "__main__":
+    main()

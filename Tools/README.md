@@ -22,6 +22,14 @@ saved offset, so generate one sheet per cell:
 python3 Tools/make_markers.py CELL_A 4 ~/Downloads/IRIS-markers-CELL_A.pdf
 ```
 
+An optional fourth argument sets the printed QR size in millimetres (default
+160). Anything above 185 mm no longer fits one A4 page, so each marker is tiled
+across a 2x2 grid of sheets with registration marks for taping together:
+
+```bash
+python3 Tools/make_markers.py VENTION 4 ~/Downloads/IRIS-markers-VENTION.pdf 240
+```
+
 ### What the pages contain
 
 - Cover sheet with placement rules.
