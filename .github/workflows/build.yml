@@ -1,24 +1,26 @@
-
 name: Build Unity Project
 
 on:
   push:
     branches:
       - main
+    # Pushing a tag such as v1.5.0 also publishes the APK as a GitHub Release.
+    tags:
+      - "v*"
   workflow_dispatch:
 
 jobs:
   build:
     name: Build for Android
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # needed to create the release on tag pushes
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Cache Library folder
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: Library
           key: Library-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
@@ -42,13 +44,21 @@ jobs:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
-          unityVersion: 6000.0.24f1
+          # Read the editor version from ProjectSettings/ProjectVersion.txt so
+          # CI never drifts from the version the project is saved with.
+          unityVersion: auto
           targetPlatform: Android
           buildMethod: BuildCommand.BuildAndroid
-          
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: IRIS-Meta-Quest3-Android-Build
           path: Builds/Android/IRIS-Meta-Quest3.apk
 
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Builds/Android/IRIS-Meta-Quest3.apk
+          generate_release_notes: true
