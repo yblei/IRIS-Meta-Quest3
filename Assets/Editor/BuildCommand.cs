@@ -13,6 +13,7 @@ public class BuildCommand
         string originalPath = "Assets/Oculus/OculusProjectConfig.asset";
         string tempResourcePath = "Assets/Resources/OculusProjectConfig.asset";
         bool assetCopied = false;
+        int exitCode = 0;
 
         try
         {
@@ -37,7 +38,7 @@ public class BuildCommand
                 else
                 {
                     Debug.LogError($"The source asset '{originalPath}' was not found. The build cannot proceed.");
-                    EditorApplication.Exit(1);
+                    exitCode = 1;
                     return;
                 }
             }
@@ -59,7 +60,7 @@ public class BuildCommand
             else
             {
                 Debug.LogError($"Build failed: {report.summary.result}");
-                EditorApplication.Exit(1);
+                exitCode = 1;
             }
         }
         finally
@@ -71,6 +72,13 @@ public class BuildCommand
                 AssetDatabase.DeleteAsset(tempResourcePath);
                 AssetDatabase.Refresh();
             }
+        }
+
+        // Exit only after the finally block: EditorApplication.Exit terminates
+        // immediately, which would leave the temporary asset behind.
+        if (exitCode != 0)
+        {
+            EditorApplication.Exit(exitCode);
         }
     }
 
